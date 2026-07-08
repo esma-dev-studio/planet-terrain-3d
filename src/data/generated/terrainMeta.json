@@ -1,0 +1,22 @@
+{
+  "generatedAt": "2026-07-08",
+  "size": {
+    "width": 2048,
+    "height": 1024
+  },
+  "moon": {
+    "radiusKm": 1737.4,
+    "heightMinKm": -9.129,
+    "heightMaxKm": 10.78,
+    "colorSource": "NASA SVS CGI Moon Kit (LROC WAC): https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_4k.tif",
+    "heightSource": "NASA SVS CGI Moon Kit (LRO LOLA): https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/ldem_3_8bit.jpg"
+  },
+  "mars": {
+    "radiusKm": 3389.5,
+    "heightMinKm": -8.201,
+    "heightMaxKm": 21.241,
+    "colorSource": "NASA Mars Trek: Mars_Viking_MDIM21_ClrMosaic_global_232m",
+    "heightSource": "NASA Mars Trek: Mars_MGS_MOLA_DEM_mosaic_global_463m_8"
+  },
+  "credit": "地形・画像: NASA / USGS (LRO LOLA, LROC, MGS MOLA, Viking) — Public Domain"
+}
