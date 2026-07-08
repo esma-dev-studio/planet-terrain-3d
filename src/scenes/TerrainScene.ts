@@ -48,6 +48,8 @@ export class TerrainScene {
   private controls: OrbitControls;
   private sphereGeo: THREE.SphereGeometry;
   private bodies = new Map<BodyId, BodyAssets>();
+  /** 読み込みの重複実行防止(同じ天体の並行ロードで二重生成しない) */
+  private bodyLoads = new Map<BodyId, Promise<BodyAssets>>();
   private activeBody: BodyId | null = null;
   private resizeObserver: ResizeObserver;
   private rafId = 0;
@@ -143,19 +145,28 @@ export class TerrainScene {
 
   // ------------------------------------------------------------ 公開 API
 
-  /** 天体を表示(初回はデータ読込) */
+  /** 天体を表示(初回はデータ読込。並行呼び出しは同じPromiseを共有) */
   async showBody(bodyId: BodyId): Promise<void> {
     if (this.activeBody === bodyId) return;
     if (!this.bodies.has(bodyId)) {
+      let load = this.bodyLoads.get(bodyId);
+      if (!load) {
+        load = this.loadBody(bodyId);
+        this.bodyLoads.set(bodyId, load);
+      }
       this.callbacks.onLoading(true);
       try {
-        this.bodies.set(bodyId, await this.loadBody(bodyId));
+        const assets = await load;
+        if (!this.bodies.has(bodyId)) this.bodies.set(bodyId, assets);
       } finally {
         this.callbacks.onLoading(false);
       }
     }
     for (const [id, assets] of this.bodies) {
-      assets.group.visible = id === bodyId;
+      const visible = id === bodyId;
+      assets.group.visible = visible;
+      // CSS2Dラベルは親グループの可視状態を継承しないため、個別に切り替える
+      for (const { obj } of assets.labelHolders) obj.visible = visible;
     }
     this.activeBody = bodyId;
     this.applyExaggeration();

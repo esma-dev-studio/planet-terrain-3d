@@ -22,7 +22,7 @@ export function useTerrainScene(
       onLoading: (v) => loadingRef.current(v),
     });
     sceneRef.current = scene;
-    void scene.showBody("moon");
+    // 初期表示の showBody は App 側の body エフェクトが行う(二重呼び出し防止)
     return () => {
       scene.dispose();
       sceneRef.current = null;
