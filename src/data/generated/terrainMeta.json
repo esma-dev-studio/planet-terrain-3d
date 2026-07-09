@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-08",
+  "generatedAt": "2026-07-09",
   "size": {
     "width": 2048,
     "height": 1024
@@ -8,8 +8,8 @@
     "radiusKm": 1737.4,
     "heightMinKm": -9.129,
     "heightMaxKm": 10.78,
-    "colorSource": "NASA SVS CGI Moon Kit (LROC WAC): https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_4k.tif",
-    "heightSource": "NASA SVS CGI Moon Kit (LRO LOLA): https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/ldem_3_8bit.jpg"
+    "colorSource": "NASA SVS CGI Moon Kit (LROC WAC): https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_2k.tif",
+    "heightSource": "NASA Moon Trek: LRO_LOLA_DEM_Global_128ppd_v04"
   },
   "mars": {
     "radiusKm": 3389.5,

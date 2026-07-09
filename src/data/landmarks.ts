@@ -21,19 +21,28 @@ interface BodyMeta {
 
 export const BODY_INFO: Record<
   BodyId,
-  { name: string; nameEn: string; accent: string; sub: string }
+  {
+    name: string;
+    nameEn: string;
+    accent: string;
+    sub: string;
+    /** 自然に見える既定の起伏強調倍率(月は実際の起伏が小さいため控えめに) */
+    defaultExaggeration: number;
+  }
 > = {
   moon: {
     name: "月",
     nameEn: "THE MOON",
     accent: "#cfd8e8",
     sub: "半径1,737km / 標高データ: LRO LOLA",
+    defaultExaggeration: 6,
   },
   mars: {
     name: "火星",
     nameEn: "MARS",
     accent: "#ff8a5a",
     sub: "半径3,390km / 標高データ: MGS MOLA",
+    defaultExaggeration: 12,
   },
 };
 

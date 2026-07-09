@@ -14,7 +14,8 @@
  * - public/data/{moon,mars}_height.png     (2048x1024, 16bitをRGチャンネルに格納)
  * - src/data/generated/terrainMeta.json    (標高レンジ・半径・クレジット)
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
@@ -29,10 +30,18 @@ const W = 2048;
 const H = 1024;
 const UA = { "User-Agent": "planet-terrain-3d (educational visualization)" };
 
+const cacheDir = join(root, ".cache");
+mkdirSync(cacheDir, { recursive: true });
+
 async function fetchBuffer(url) {
+  const key = createHash("md5").update(url).digest("hex");
+  const cachePath = join(cacheDir, key);
+  if (existsSync(cachePath)) return readFileSync(cachePath);
   const res = await fetch(url, { headers: UA });
   if (!res.ok) throw new Error(`${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
+  const buf = Buffer.from(await res.arrayBuffer());
+  writeFileSync(cachePath, buf);
+  return buf;
 }
 
 async function tryCandidates(urls) {
@@ -95,9 +104,48 @@ async function writeColor(buf, outName) {
 async function writeHeight(buf, outName) {
   const meta = await sharp(buf).metadata();
   const is16 = meta.depth === "ushort";
+  const isFloat = meta.depth === "float";
   const norm = new Float32Array(W * H); // 0..1
+  /** floatソース(値=km)のときだけ実測レンジを返す */
+  let measured = null;
 
-  if (is16) {
+  if (isFloat) {
+    // 値そのものが標高[km]。実測min/maxで正規化し、その値をメタに使う
+    const raw = await sharp(buf).raw({ depth: "float" }).toBuffer();
+    const ch = meta.channels ?? 1;
+    const src = new Float32Array(raw.buffer, raw.byteOffset, meta.width * meta.height * ch);
+    let vMin = Infinity;
+    let vMax = -Infinity;
+    for (let i = 0; i < meta.width * meta.height; i++) {
+      const v = src[i * ch];
+      if (!Number.isFinite(v)) continue;
+      if (v < vMin) vMin = v;
+      if (v > vMax) vMax = v;
+    }
+    console.log(`  float km range: ${vMin.toFixed(3)}..${vMax.toFixed(3)}`);
+    measured = { minKm: vMin, maxKm: vMax };
+    const rx = meta.width / W;
+    const ry = meta.height / H;
+    for (let y = 0; y < H; y++) {
+      const sy0 = Math.floor(y * ry);
+      const sy1 = Math.min(meta.height, Math.max(sy0 + 1, Math.floor((y + 1) * ry)));
+      for (let x = 0; x < W; x++) {
+        const sx0 = Math.floor(x * rx);
+        const sx1 = Math.min(meta.width, Math.max(sx0 + 1, Math.floor((x + 1) * rx)));
+        let sum = 0;
+        let n = 0;
+        for (let sy = sy0; sy < sy1; sy++) {
+          for (let sx = sx0; sx < sx1; sx++) {
+            const v = src[(sy * meta.width + sx) * ch];
+            if (!Number.isFinite(v)) continue;
+            sum += v;
+            n++;
+          }
+        }
+        norm[y * W + x] = n > 0 ? (sum / n - vMin) / (vMax - vMin) : 0.5;
+      }
+    }
+  } else if (is16) {
     // 生サンプル(色処理なし)
     const raw = await sharp(buf).raw({ depth: "ushort" }).toBuffer();
     const ch = meta.channels ?? 1;
@@ -140,6 +188,45 @@ async function writeHeight(buf, outName) {
     for (let i = 0; i < W * H; i++) norm[i] = raw[i] / 255;
   }
 
+  // 1-2-1カーネルの縦→横ブラー。行ごとの交互ノイズ(周波数π成分)は
+  // このカーネルでゲイン0になり完全に消える。実地形への影響は1〜2セル分
+  const blur121 = (vertical) => {
+    const tmp = Float32Array.from(norm);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        let a, b;
+        if (vertical) {
+          a = tmp[Math.max(y - 1, 0) * W + x];
+          b = tmp[Math.min(y + 1, H - 1) * W + x];
+        } else {
+          a = tmp[y * W + ((x - 1 + W) % W)];
+          b = tmp[y * W + ((x + 1) % W)];
+        }
+        norm[y * W + x] = tmp[y * W + x] * 0.5 + (a + b) * 0.25;
+      }
+    }
+  };
+  // 縦方向の単発行スパイク(軌道由来のアーティファクト)をメディアンで除去
+  const medianV = () => {
+    const tmp = Float32Array.from(norm);
+    for (let y = 0; y < H; y++) {
+      const y0 = Math.max(y - 1, 0) * W;
+      const y1 = y * W;
+      const y2 = Math.min(y + 1, H - 1) * W;
+      for (let x = 0; x < W; x++) {
+        const a = tmp[y0 + x];
+        const b = tmp[y1 + x];
+        const c = tmp[y2 + x];
+        norm[y1 + x] = Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
+      }
+    }
+  };
+  medianV();
+  medianV();
+  blur121(true);
+  blur121(true);
+  blur121(false);
+
   const rgb = Buffer.alloc(W * H * 3);
   for (let i = 0; i < W * H; i++) {
     const v = Math.round(Math.min(Math.max(norm[i], 0), 1) * 65535);
@@ -150,6 +237,7 @@ async function writeHeight(buf, outName) {
     .png({ compressionLevel: 9 })
     .toFile(join(outPub, outName));
   console.log(`  -> ${outName} (source depth: ${meta.depth}, ${meta.width}x${meta.height})`);
+  return measured;
 }
 
 // ============================== 月 ==============================
@@ -164,28 +252,21 @@ if (!moonColor) throw new Error("moon color not found");
 await writeColor(moonColor.buf, "moon_color.jpg");
 
 console.log("MOON height:");
-// 第一候補: Trekタイル(火星と同じ8bit DEM系列)/ 予備: SVSの定番8bit変位マップ
+// Moon TrekのLOLA DEMタイル(空間配置が確実な8bit)を第一候補にする。
+// ※SVSのfloat/uint TIFFはsharpのraw読み出しで空間が壊れる事象を確認済み
 let moonHeightBuf = null;
 let moonHeightSrc = "";
-for (const [layer, ext] of [
-  ["LRO_LOLA_DEM_Global_256ppd_v06_8bit", "png"],
-  ["LRO_LOLA_DEM_Global_256ppd_v06_8bit", "jpg"],
-]) {
-  try {
-    moonHeightBuf = await stitchTrek("Moon", layer, 2, ext);
-    moonHeightSrc = `NASA Moon Trek: ${layer}`;
-    break;
-  } catch (e) {
-    console.log(`  layer NG: ${layer}.${ext} (${e.message})`);
-  }
-}
-if (!moonHeightBuf) {
+try {
+  moonHeightBuf = await stitchTrek("Moon", "LRO_LOLA_DEM_Global_128ppd_v04", 2, "png");
+  moonHeightSrc = "NASA Moon Trek: LRO_LOLA_DEM_Global_128ppd_v04";
+} catch (e) {
+  console.log(`  trek NG (${e.message})`);
   const fallback = await tryCandidates([`${SVS}ldem_3_8bit.jpg`]);
   if (!fallback) throw new Error("moon height not found");
   moonHeightBuf = fallback.buf;
   moonHeightSrc = `NASA SVS CGI Moon Kit (LRO LOLA): ${fallback.url}`;
 }
-await writeHeight(moonHeightBuf, "moon_height.png");
+const moonRange = await writeHeight(moonHeightBuf, "moon_height.png");
 
 // ============================== 火星 ==============================
 console.log("MARS color:");
@@ -231,9 +312,9 @@ const metaOut = {
   size: { width: W, height: H },
   moon: {
     radiusKm: 1737.4,
-    // LOLA LDEM の公称レンジ(8/16bit版はこの範囲に正規化されている)
-    heightMinKm: -9.129,
-    heightMaxKm: 10.78,
+    // floatソースなら実測レンジ、そうでなければLOLA公称レンジ
+    heightMinKm: moonRange ? Math.round(moonRange.minKm * 1000) / 1000 : -9.129,
+    heightMaxKm: moonRange ? Math.round(moonRange.maxKm * 1000) / 1000 : 10.78,
     colorSource: `NASA SVS CGI Moon Kit (LROC WAC): ${moonColor.url}`,
     heightSource: moonHeightSrc,
   },

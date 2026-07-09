@@ -2,8 +2,14 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { LANDMARKS, TERRAIN_META } from "../data/landmarks";
-import type { BodyId, Landmark, PointSelection } from "../types/terrain";
-import { createTerrainMaterial, SCENE_RADIUS, type TerrainUniforms } from "./terrainMaterial";
+import type { BodyId, Landmark, PointSelection, RoverSite } from "../types/terrain";
+import { RoverMode, type RoverTelemetry } from "./RoverMode";
+import {
+  createHeightTexture,
+  createTerrainMaterial,
+  SCENE_RADIUS,
+  type TerrainUniforms,
+} from "./terrainMaterial";
 
 /**
  * 月・火星の地形シーン統括クラス。
@@ -58,6 +64,10 @@ export class TerrainScene {
   private exaggeration = 15;
   private sunAzimuthDeg = 40;
 
+  // ローバーモード(地上探索)。有効な間は軌道ビューの代わりに描画される
+  private roverMode: RoverMode | null = null;
+  private clock = new THREE.Clock();
+
   private camAnim: {
     fromPos: THREE.Vector3;
     toPos: THREE.Vector3;
@@ -81,6 +91,9 @@ export class TerrainScene {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h);
+    // ローバーモードの影用(軌道ビューはライトを使わないため影響なし)
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
 
     this.labelRenderer = new CSS2DRenderer();
@@ -181,6 +194,7 @@ export class TerrainScene {
   setSunAzimuth(deg: number): void {
     this.sunAzimuthDeg = deg;
     this.applySun();
+    this.roverMode?.applySun(deg);
   }
 
   setGrid(on: boolean): void {
@@ -222,8 +236,49 @@ export class TerrainScene {
     );
   }
 
+  /** ローバー探索モードへ入る(地形パッチ生成のため一瞬読み込み表示を出す) */
+  async enterRover(site: RoverSite): Promise<void> {
+    if (this.roverMode) this.exitRover();
+    await this.showBody(site.bodyId);
+    const assets = this.bodies.get(site.bodyId)!;
+    this.callbacks.onLoading(true);
+    // ローディング表示を描画させてから重い地形生成を行う
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      this.roverMode = new RoverMode({
+        site,
+        grid: assets.heightGrid,
+        gridW: assets.gridW,
+        gridH: assets.gridH,
+        radiusKm: assets.radiusKm,
+        sunAzimuthDeg: this.sunAzimuthDeg,
+        earthTextureUrl: `${import.meta.env.BASE_URL}textures/2k_earth_daymap.jpg`,
+      });
+      this.roverMode.resize(this.container.clientWidth / this.container.clientHeight);
+      this.controls.enabled = false;
+      // 前モードのラベルDOMを掃除(次のrenderで必要な分だけ再登録される)
+      this.labelRenderer.domElement.replaceChildren();
+    } finally {
+      this.callbacks.onLoading(false);
+    }
+  }
+
+  /** ローバー探索モードを終了して軌道ビューへ戻る */
+  exitRover(): void {
+    if (!this.roverMode) return;
+    this.roverMode.dispose();
+    this.roverMode = null;
+    this.controls.enabled = true;
+    this.labelRenderer.domElement.replaceChildren();
+  }
+
+  getRoverTelemetry(): RoverTelemetry | null {
+    return this.roverMode?.getTelemetry() ?? null;
+  }
+
   dispose(): void {
     this.disposed = true;
+    this.exitRover();
     cancelAnimationFrame(this.rafId);
     this.resizeObserver.disconnect();
     this.renderer.domElement.removeEventListener("pointerdown", this.onPointerDown);
@@ -245,11 +300,18 @@ export class TerrainScene {
     const meta = TERRAIN_META[bodyId];
     const base = import.meta.env.BASE_URL + "data/";
     const loader = new THREE.TextureLoader();
-    const [colorTex, heightTex, grid] = await Promise.all([
+    const [colorTex, grid] = await Promise.all([
       loader.loadAsync(`${base}${bodyId}_color.jpg`),
-      loader.loadAsync(`${base}${bodyId}_height.png`),
       this.loadHeightGrid(`${base}${bodyId}_height.png`, meta.heightMinKm, meta.heightMaxKm),
     ]);
+    // 高さはCPU展開済みグリッドからFloatテクスチャを作る(バイト分割補間の縞を回避)
+    const heightTex = createHeightTexture(
+      grid.data,
+      grid.w,
+      grid.h,
+      meta.heightMinKm,
+      meta.heightMaxKm
+    );
 
     const material = createTerrainMaterial(colorTex, heightTex, {
       heightMinKm: meta.heightMinKm,
@@ -394,6 +456,15 @@ export class TerrainScene {
   private tick = (): void => {
     if (this.disposed) return;
     this.rafId = requestAnimationFrame(this.tick);
+    const dt = Math.min(this.clock.getDelta(), 0.1);
+
+    // ローバーモード中は地上シーンだけを描画する
+    if (this.roverMode) {
+      this.roverMode.update(dt);
+      this.renderer.render(this.roverMode.scene, this.roverMode.camera);
+      this.labelRenderer.render(this.roverMode.scene, this.roverMode.camera);
+      return;
+    }
 
     if (this.camAnim) {
       const a = this.camAnim;
@@ -419,6 +490,7 @@ export class TerrainScene {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     this.labelRenderer.setSize(w, h);
+    this.roverMode?.resize(w / h);
   }
 
   private onPointerDown = (e: PointerEvent): void => {

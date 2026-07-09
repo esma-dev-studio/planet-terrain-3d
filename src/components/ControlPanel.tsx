@@ -1,5 +1,6 @@
 import { BODY_INFO, LANDMARKS } from "../data/landmarks";
-import type { BodyId, Landmark } from "../types/terrain";
+import { ROVER_SITES } from "../data/roverSites";
+import type { BodyId, Landmark, RoverSite } from "../types/terrain";
 
 /** 左側の操作パネル */
 
@@ -16,6 +17,7 @@ export interface ControlPanelProps {
   onGrid(v: boolean): void;
   autoRotate: boolean;
   onAutoRotate(v: boolean): void;
+  onRoverSite(site: RoverSite): void;
 }
 
 export function ControlPanel(p: ControlPanelProps) {
@@ -58,6 +60,21 @@ export function ControlPanel(p: ControlPanelProps) {
             </span>
           </button>
         ))}
+      </section>
+
+      <section>
+        <div className="sec-title">
+          ROVER <span className="jp">月面ローバー探索</span>
+        </div>
+        {ROVER_SITES.map((s) => (
+          <button key={s.id} className="landmark-row rover-site" onClick={() => p.onRoverSite(s)}>
+            <span className="name">🛞 {s.name}</span>
+            <span className="meta">走る</span>
+          </button>
+        ))}
+        <div className="panel-hint">
+          地表に降りてキー操作で運転できます(WASD/矢印)。
+        </div>
       </section>
 
       <section>

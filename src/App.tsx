@@ -2,18 +2,23 @@ import { useCallback, useEffect, useState } from "react";
 import { BottomBar } from "./components/BottomBar";
 import { ControlPanel } from "./components/ControlPanel";
 import { PointPopup } from "./components/PointPopup";
+import { RoverOverlay } from "./components/RoverOverlay";
 import { TitleHeader } from "./components/TitleHeader";
+import { BODY_INFO } from "./data/landmarks";
 import { useTerrainScene } from "./hooks/useTerrainScene";
-import type { BodyId, Landmark, PointSelection } from "./types/terrain";
+import type { BodyId, Landmark, PointSelection, RoverSite } from "./types/terrain";
 
 export default function App() {
   const [body, setBody] = useState<BodyId>("moon");
   const [selectedLandmarkId, setSelectedLandmarkId] = useState<string | null>(null);
-  const [exaggeration, setExaggeration] = useState(15);
+  const [exaggeration, setExaggeration] = useState(
+    BODY_INFO.moon.defaultExaggeration
+  );
   const [sunAzimuth, setSunAzimuth] = useState(40);
   const [grid, setGrid] = useState(false);
   const [autoRotate, setAutoRotate] = useState(false);
   const [selection, setSelection] = useState<PointSelection | null>(null);
+  const [roverSite, setRoverSite] = useState<RoverSite | null>(null);
   const [loading, setLoading] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true);
 
@@ -25,6 +30,8 @@ export default function App() {
     void sceneRef.current?.showBody(body);
     setSelectedLandmarkId(null);
     setSelection(null);
+    // 天体ごとに自然に見える既定倍率へ(月は起伏が小さいので控えめ)
+    setExaggeration(BODY_INFO[body].defaultExaggeration);
   }, [body, sceneRef]);
 
   useEffect(() => {
@@ -43,18 +50,32 @@ export default function App() {
     sceneRef.current?.setAutoRotate(autoRotate);
   }, [autoRotate, sceneRef]);
 
+  const exitRover = useCallback(() => {
+    sceneRef.current?.exitRover();
+    setRoverSite(null);
+  }, [sceneRef]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelection(null);
+      if (e.key !== "Escape") return;
+      if (roverSite) exitRover();
+      else setSelection(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [roverSite, exitRover]);
 
   const flyTo = (l: Landmark) => {
     setSelectedLandmarkId(l.id);
     setSelection(null);
     sceneRef.current?.flyToLandmark(l);
+  };
+
+  const enterRover = (site: RoverSite) => {
+    setSelection(null);
+    setBody(site.bodyId);
+    setRoverSite(site);
+    void sceneRef.current?.enterRover(site);
   };
 
   return (
@@ -64,11 +85,13 @@ export default function App() {
 
       <TitleHeader />
 
-      <button className="panel-toggle" onClick={() => setPanelOpen((v) => !v)}>
-        {panelOpen ? "PANEL ◂" : "PANEL ▸"}
-      </button>
+      {!roverSite && (
+        <button className="panel-toggle" onClick={() => setPanelOpen((v) => !v)}>
+          {panelOpen ? "PANEL ◂" : "PANEL ▸"}
+        </button>
+      )}
 
-      {panelOpen && (
+      {!roverSite && panelOpen && (
         <ControlPanel
           body={body}
           onBody={setBody}
@@ -82,19 +105,28 @@ export default function App() {
           onGrid={setGrid}
           autoRotate={autoRotate}
           onAutoRotate={setAutoRotate}
+          onRoverSite={enterRover}
         />
       )}
 
-      <BottomBar
-        body={body}
-        selectedLandmarkId={selectedLandmarkId}
-        onReset={() => {
-          setSelectedLandmarkId(null);
-          sceneRef.current?.resetView();
-        }}
-      />
+      {!roverSite && (
+        <BottomBar
+          body={body}
+          selectedLandmarkId={selectedLandmarkId}
+          onReset={() => {
+            setSelectedLandmarkId(null);
+            sceneRef.current?.resetView();
+          }}
+        />
+      )}
 
-      {selection && <PointPopup selection={selection} onClose={() => setSelection(null)} />}
+      {roverSite && (
+        <RoverOverlay site={roverSite} sceneRef={sceneRef} onExit={exitRover} />
+      )}
+
+      {!roverSite && selection && (
+        <PointPopup selection={selection} onClose={() => setSelection(null)} />
+      )}
 
       {loading && (
         <div className="loading-overlay">

@@ -20,9 +20,8 @@ varying vec2 vUv;
 varying vec3 vNormalS;
 
 float heightKm(vec2 uv) {
-  vec3 t = texture2D(uHeight, uv).rgb;
-  float h01 = (t.r * 255.0 * 256.0 + t.g * 255.0) / 65535.0;
-  return mix(uHeightMinKm, uHeightMaxKm, h01);
+  // Floatテクスチャ(R=正規化高さ)。ハードウェア補間で滑らか
+  return mix(uHeightMinKm, uHeightMaxKm, texture2D(uHeight, uv).r);
 }
 
 void main() {
@@ -48,9 +47,7 @@ varying vec2 vUv;
 varying vec3 vNormalS;
 
 float heightKm(vec2 uv) {
-  vec3 t = texture2D(uHeight, uv).rgb;
-  float h01 = (t.r * 255.0 * 256.0 + t.g * 255.0) / 65535.0;
-  return mix(uHeightMinKm, uHeightMaxKm, h01);
+  return mix(uHeightMinKm, uHeightMaxKm, texture2D(uHeight, uv).r);
 }
 
 void main() {
@@ -68,13 +65,15 @@ void main() {
   float lonScale = max(sqrt(max(1.0 - n.y * n.y, 0.0)), 0.06);
   float dxKm = circumKm * uTexel.x * lonScale;
   float dyKm = circumKm * 0.5 * uTexel.y;
-  float gx = (hR - hL) * uExagg / (2.0 * dxKm);
-  float gy = (hU - hD) * uExagg / (2.0 * dyKm);
+  // 陰影用の勾配は強調倍率に上限を設ける(高倍率でも岩のように荒れない)
+  float shadeExagg = min(uExagg, 8.0);
+  float gx = (hR - hL) * shadeExagg / (2.0 * dxKm);
+  float gy = (hU - hD) * shadeExagg / (2.0 * dyKm);
   vec3 pn = normalize(n - east * gx - north * gy);
 
   float diff = max(dot(pn, normalize(uSunDir)), 0.0);
   vec3 base = texture2D(uColor, vUv).rgb;
-  vec3 col = base * (0.26 + diff * 1.35);
+  vec3 col = base * (0.3 + diff * 1.15);
 
   // 30度ごとの経緯線(トグル)
   if (uGrid > 0.5) {
@@ -98,6 +97,36 @@ export interface TerrainUniforms {
   uTexel: { value: THREE.Vector2 };
 }
 
+/**
+ * CPU展開済みの高さグリッド(km)から、GPU用のFloatテクスチャを作る。
+ * 8/16bit PNGをそのままサンプリングするとバイト分割の補間で縞が出るため、
+ * 正規化した実数値1チャンネルとして渡す。
+ */
+export function createHeightTexture(
+  grid: Float32Array,
+  w: number,
+  h: number,
+  minKm: number,
+  maxKm: number
+): THREE.DataTexture {
+  const data = new Float32Array(grid.length);
+  const range = maxKm - minKm || 1;
+  // 画像の上端(北)がUVのv=1側に来るよう、行を反転して詰める
+  // (DataTextureのflipYは配列アップロードでは効かない環境があるため自前で行う)
+  for (let y = 0; y < h; y++) {
+    const src = (h - 1 - y) * w;
+    const dst = y * w;
+    for (let x = 0; x < w; x++) data[dst + x] = (grid[src + x] - minKm) / range;
+  }
+  const tex = new THREE.DataTexture(data, w, h, THREE.RedFormat, THREE.FloatType);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = THREE.RepeatWrapping; // 経度方向は周回
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 export function createTerrainMaterial(
   colorTex: THREE.Texture,
   heightTex: THREE.Texture,
@@ -111,10 +140,6 @@ export function createTerrainMaterial(
 ): THREE.ShaderMaterial & { uniforms: TerrainUniforms } {
   colorTex.colorSpace = THREE.SRGBColorSpace;
   colorTex.anisotropy = 8;
-  // 高さはデータなので補間はリニア・色空間変換なし
-  heightTex.colorSpace = THREE.NoColorSpace;
-  heightTex.minFilter = THREE.LinearFilter;
-  heightTex.magFilter = THREE.LinearFilter;
 
   const material = new THREE.ShaderMaterial({
     vertexShader: VERT,

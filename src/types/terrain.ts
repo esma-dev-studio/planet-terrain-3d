@@ -15,6 +15,21 @@ export interface Landmark {
   desc: string;
 }
 
+/** ローバー探索サイト */
+export interface RoverSite {
+  id: string;
+  bodyId: BodyId;
+  name: string;
+  nameEn: string;
+  lat: number;
+  lon: number;
+  desc: string;
+  /** 月面基地(架空)を配置するか */
+  hasBase?: boolean;
+  /** 空に地球を表示するか(月の表側) */
+  earthInSky?: boolean;
+}
+
 /** 地表クリック時の選択情報 */
 export interface PointSelection {
   bodyId: BodyId;
