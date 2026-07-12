@@ -3,7 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { LANDMARKS, TERRAIN_META } from "../data/landmarks";
 import type { BodyId, Landmark, PointSelection, RoverSite } from "../types/terrain";
-import { RoverMode, type RoverTelemetry } from "./RoverMode";
+import { RoverMode, type RoverControl, type RoverTelemetry } from "./RoverMode";
 import {
   createHeightTexture,
   createTerrainMaterial,
@@ -274,6 +274,11 @@ export class TerrainScene {
 
   getRoverTelemetry(): RoverTelemetry | null {
     return this.roverMode?.getTelemetry() ?? null;
+  }
+
+  /** 画面上のタッチパッドからローバーへ入力を渡す */
+  setRoverInput(control: RoverControl, active: boolean): void {
+    this.roverMode?.setInput(control, active);
   }
 
   dispose(): void {

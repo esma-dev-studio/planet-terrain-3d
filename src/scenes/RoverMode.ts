@@ -32,9 +32,12 @@ export interface RoverModeParams {
 
 const PATCH_SIZE = 6000; // [m]
 const PATCH_SEG = 400;
-const MAX_SPEED = 7; // [m/s]
-const REVERSE_SPEED = 3;
-const TURN_RATE = 1.25; // [rad/s]
+const MAX_SPEED = 16; // [m/s] 約58km/h(体験優先で実機よりずっと速い)
+const REVERSE_SPEED = 7;
+const TURN_RATE = 1.6; // [rad/s]
+
+/** 画面上のタッチパッドから渡す仮想入力 */
+export type RoverControl = "fwd" | "back" | "left" | "right";
 
 /** 文字列シードの決定的乱数(サイトごとに同じ地形になる) */
 function mulberry32(seedStr: string): () => number {
@@ -98,6 +101,8 @@ export class RoverMode {
   private speed = 0;
   private odometer = 0;
   private keys = new Set<string>();
+  // タッチパッド(iPad等のキーボードなし端末)からの入力。キーボードと併用可
+  private pad = { fwd: false, back: false, left: false, right: false };
 
   // 地形生成(演出ディテール)
   private noise: (x: number, y: number) => number;
@@ -577,6 +582,11 @@ export class RoverMode {
 
   // ------------------------------------------------------------ 更新
 
+  /** タッチパッドからの入力(押している間true) */
+  setInput(control: RoverControl, active: boolean): void {
+    this.pad[control] = active;
+  }
+
   private onKey = (e: KeyboardEvent): void => {
     const k = e.key.toLowerCase();
     if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) {
@@ -610,12 +620,12 @@ export class RoverMode {
 
   update(dt: number): void {
     // 入力 → 速度・向き
-    const fwd = this.keys.has("w") || this.keys.has("arrowup");
-    const back = this.keys.has("s") || this.keys.has("arrowdown");
-    const left = this.keys.has("a") || this.keys.has("arrowleft");
-    const right = this.keys.has("d") || this.keys.has("arrowright");
+    const fwd = this.keys.has("w") || this.keys.has("arrowup") || this.pad.fwd;
+    const back = this.keys.has("s") || this.keys.has("arrowdown") || this.pad.back;
+    const left = this.keys.has("a") || this.keys.has("arrowleft") || this.pad.left;
+    const right = this.keys.has("d") || this.keys.has("arrowright") || this.pad.right;
     const target = fwd ? MAX_SPEED : back ? -REVERSE_SPEED : 0;
-    this.speed += (target - this.speed) * Math.min(dt * 2.2, 1);
+    this.speed += (target - this.speed) * Math.min(dt * 3, 1);
     if (Math.abs(this.speed) < 0.02 && target === 0) this.speed = 0;
     const steer = (left ? 1 : 0) - (right ? 1 : 0);
     this.heading += steer * TURN_RATE * dt;
